@@ -1,23 +1,8 @@
 # pwn.college - Binary Reverse Engineering  - level14_testing1
 
-Disclaimer:
-- At the time of writing this reverse engineering challenge write-up, I had already solved both this challenge and the teaching version of the challenge, plus all the later pwn.college reverse engineering challenges, so I knew the inner workings of the emulator very well. As a result, I may have glossed over some areas that might seem obvious now, but were potentially important when gathering information for the first time.
-- Parts of the solution, such as the GDB script were not written in one go, but were refined over a number of iterations, and the format of the GDB script output borrows heavily from the ouput produced by the teaching version of the ELF binary.
-
 ## [Part 0] Setup Challenge
-- If using the Docker container setup referred to in [00-Setup](../../00-Setup/index.html), a copy of the ELF binary can be found at `/challenges/babyrev/level14_testing1` in the Docker container, so copy ELF binary to root directory of Docker container, then set privileges and setuid:
-> `sudo cp /challenges/babyrev/level14_testing1 / && sudo chmod 4755 /level14_testing1`  
 - The original ELF binary can be found here: [download](https://github.com/pwncollege/challenges/raw/master/babyrev/level14_testing1)
 - A copy of the ELF binary has also been included here: [download](./level14_testing1)
-- Add a fake flag if necessary:
-> $ `echo pwn_college{a_secret_fake_flag} | sudo tee /flag && sudo chown root:root /flag && sudo chmod 400 /flag`  
-- Test `/flag` file permissions deny access for current `ctf` user:
-> $ `whoami`  
-> `ctf`  
-> $ `ls -al /flag`  
-> `-r-------- 1 root root 37 Aug 11 04:37 /flag`  
-> $ `cat /flag`  
-> `cat: /flag: Permission denied`  
 
 ### Basic Info on Challenge Binary
 > `rabin2 -I /level14_testing1`  
@@ -265,7 +250,7 @@ INCORRECT!
 ### Summary of Part 1
 - Each instruction is **size 3 bytes** (Note: the instruction order can change for different versions of the ELF binary)
 - Register, opcode, syscall, compare lookup values are known (Note: the register, opcode, syscall and cmp mappings can change for different versions of the ELF binary):  
-```
+```python
 # Pseudo Python code for notes purposes only
 registers = {
     reg_0x3fc: 0x20, # (case 32)
@@ -389,7 +374,7 @@ End with a line saying just "end".
 > rsi    0x11040    (which is 0x401001 when accounting for endianness)  
 - Therefore, instruction order when viewing `obj.vm_code` is [op, arg1, arg2] (Note: the instruction order can change for different versions of the ELF binary)
 - At this point (at beginning of 6th cycle, i.e. not yet executed current [0x40, 0x10, 0x01] instruction), based on the instructions executed thus far, the state of the emulator's registers is expected to be:
-```
+```makefile
 reg_0x3fc = 0x00
 reg_0x3fd = 0x00
 reg_0x3fe = 0x8f
@@ -420,7 +405,7 @@ reg_0x402 = 0x00
 ??registers???: 0x3fc   0x3fd   0x3fe   0x3ff   0x400   0x401   0x402
 ```
 - Revise assumption on state of the emulator's registers based on dumped stack values:
-```
+```makefile
 reg_0x3fc = 0x00
 reg_0x3fd = 0x00
 reg_0x3fe = 0x8f
@@ -443,20 +428,20 @@ reg_0x402 = 0x00
 - Write a GDB script using the known mappings derived thus far, snippets of the GDB script will be described below:
 > $ `vim /tmp/rev_level14_testing1.gdb`  
 - Begin script with `start` so that breakpoint is set at main and process is run:
-```
+```less
 start
 ```
 - Set some variables that will used repeatedly
 - `reg_offs` is the offset from rsp that was determined in the previous section that locates the emulator's register state
 - In the previous section, the instructions were found to be in rsi at the relevant breakpoints, so `shift_op`, `shift_a1`, `shift_a2` are the amounts to shift rsi by to isolate each byte of the instruction
-```
+```bash
 set $reg_offs = 1124
 set $shift_op = 0x00
 set $shift_a1 = 0x08
 set $shift_a2 = 0x10
 ```
 - Register mappings were determined in the radare2 static analysis performed previously:
-```
+```bash
 define describe_reg
     if $arg0 == 0x20
         printf "reg_0x3fc"
@@ -485,7 +470,7 @@ define describe_reg
 end
 ```
 - Syscall mappings were determined in the radare2 static analysis performed previously:
-```
+```bash
 define describe_sys
     if $arg0 == 0x20
         printf "open"
@@ -508,7 +493,7 @@ define describe_sys
 end
 ```
 - Jump mappings were determined in the radare2 static analysis performed previously:
-```
+```bash
 define describe_jmp
     if $arg0 & 0x10
         printf "L"
@@ -528,20 +513,20 @@ define describe_jmp
 end
 ```
 - Define a function that prints the emulator's register state that can be called at each breakpoint:
-```
+```bash
 define vm_state
     set $reg_state = (long long) *(void**) ($rsp + $reg_offs)
     printf "[V] reg_0x3fc:%#x reg_0x3fd:%#x reg_0x3fe:%#x reg_0x3ff:%#x reg_0x400:%#x reg_0x401:%#x reg_0x402:%#x\n", $reg_state >> 0x00 & 0xff, $reg_state >> 0x08 & 0xff, $reg_state >> 0x10 & 0xff, $reg_state >> 0x18 & 0xff, $reg_state >> 0x20 & 0xff, $reg_state >> 0x28 & 0xff, $reg_state >> 0x30 & 0xff
 end
 ```
 - Define a function that describes each instruction that can be called at each breakpoint:
-```
+```bash
 define vm_instruction
     printf "[I] op:%#x arg1:%#x arg2:%#x\n", $rsi>>$shift_op&0xff, $rsi>>$shift_a1&0xff, $rsi>>$shift_a2&0xff
 end
 ```
 - Break at all the `interpret_*` function calls and print some useful info using a combo of previously defined helper functions and `printf` specific to each breakpoint:
-```
+```bash
 break interpret_imm
 commands
     vm_state
@@ -652,7 +637,7 @@ end
 
 ```
 - Finally, end with `continue` so that GDB will be able to continue execution of program:
-```
+```bash
 continue
 ```
 - Run GDB in batch mode with the script just written:
@@ -865,7 +850,7 @@ Breakpoint 4, 0x00005628cc387527 in interpret_stk ()
 - So the first time the breakpoint hits the `interpret_cmp` instruction it's comparing `reg_0x3fc:0x41` vs `reg_0x3fd:0x2e`
 - `reg_0x3fc` value is 0x41, which looks like it could be one of our inputted values
 - From the previous static analysis using radare2, the `interpret_cmp` instruction set flags in the following manner:
-```
+```python
 # Pseudo Python code for notes purposes only
 flag_value = ''
 if cmp_x < cmp_y: flag_value += flag_value | 0x10 # i.e. 'L'
@@ -915,7 +900,7 @@ Breakpoint 4, 0x000055b0ca655527 in interpret_stk ()
 - Each instruction is **size 3 bytes** (Note: the instruction order can change for different versions of the ELF binary)
 - Register, opcode, syscall, compare lookup values are known (Note: the register, opcode, syscall and cmp mappings can change for different versions of the ELF binary)
 - Rename registers based on new info:  
-```
+```python
 # Pseudo Python code for notes purposes only
 registers = {
     a: 0x20, # (case 32)
@@ -952,7 +937,7 @@ if flag_value & 0x04: jump_description += 'N'
 if flag_value & 0x08: jump_description += 'Z'
 ```
 - Update GDB script with new register names:
-```
+```bash
 [...]
 define describe_reg
     if $arg0 == 0x20
@@ -1102,7 +1087,7 @@ Breakpoint 7, 0x000055c98537f698 in interpret_cmp ()
 
 ### Get Flag Script Using Python
 - `vim /tmp/rev_level14_testing1.py`
-```
+```python
 import os
 import re
 import subprocess
@@ -1170,7 +1155,7 @@ if __name__=='__main__':
 Key: \xd2\xab\x34\x27\x97\x47\x57\xa8\xc2\x3b\x90\x2e
 
 [*] Obtaining flag from setuid binary:
-pwn_college{a_secret_fake_flag}
+pwn_college{flag}
 ```
 - And there's the flag
 - We can also `echo` the key and pipe it to the ELF binary to confirm:
@@ -1184,5 +1169,5 @@ pwn_college{a_secret_fake_flag}
 [+] have to understand that code to get the flag. Good luck!
 [+] Starting interpreter loop! Good luck!
 ENTER KEY: CORRECT! Here is your flag:
-pwn_college{a_secret_fake_flag}
+pwn_college{flag}
 ```
